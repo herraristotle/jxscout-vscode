@@ -35,18 +35,22 @@
           "type": "tree",
           "id": "jxscoutAstView",
           "name": "Descriptors",
-          "icon": "symbol-structure",
-          "when": "scope == file"
+          "icon": "symbol-structure"
         },
         {
-          "type": "webview",
-          "id": "jxscoutPremiumView",
-          "name": "Descriptors",
-          "icon": "symbol-structure",
-          "when": "scope == project"
+          "type": "tree",
+          "id": "jxscoutFindingsView",
+          "name": "Findings",
+          "icon": "shield"
         },
         {
-          "type": "webview",
+          "type": "tree",
+          "id": "jxscoutBookmarksView",
+          "name": "Bookmarks",
+          "icon": "bookmark"
+        },
+        {
+          "type": "tree",
           "id": "jxscoutFileView",
           "name": "File Explorer",
           "icon": "files"
@@ -88,6 +92,55 @@
         "command": "jxscout.toggleSortMode",
         "title": "Toggle sort mode",
         "icon": "$(sort-precedence)"
+      },
+      {
+        "command": "jxscout.cycleMatchFilter",
+        "title": "Cycle match filter (all/unseen/interesting)",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "jxscout.markInteresting",
+        "title": "Mark as interesting",
+        "icon": "$(star)"
+      },
+      {
+        "command": "jxscout.resetMatchStates",
+        "title": "Reset seen/interesting states"
+      },
+      {
+        "command": "jxscout.createFindingFromMatches",
+        "title": "Create finding from selection",
+        "icon": "$(shield-add)"
+      },
+      {
+        "command": "jxscout.bookmarkMatch",
+        "title": "Bookmark match",
+        "icon": "$(bookmark)"
+      },
+      {
+        "command": "jxscout.deleteBookmark",
+        "title": "Delete bookmark",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "jxscout.copyFindingDescription",
+        "title": "Copy finding description",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "jxscout.filterFindings",
+        "title": "Filter findings by severity",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "jxscout.refreshFindings",
+        "title": "Refresh findings",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "jxscout.refreshBookmarks",
+        "title": "Refresh bookmarks",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
@@ -108,13 +161,23 @@
           "group": "navigation"
         },
         {
-          "command": "jxscout.toggleScope",
-          "when": "view == jxscoutPremiumView",
+          "command": "jxscout.cycleMatchFilter",
+          "when": "view == jxscoutAstView",
           "group": "navigation"
         },
         {
-          "command": "jxscout.toggleSortMode",
-          "when": "view == jxscoutPremiumView",
+          "command": "jxscout.filterFindings",
+          "when": "view == jxscoutFindingsView",
+          "group": "navigation"
+        },
+        {
+          "command": "jxscout.refreshFindings",
+          "when": "view == jxscoutFindingsView",
+          "group": "navigation"
+        },
+        {
+          "command": "jxscout.refreshBookmarks",
+          "when": "view == jxscoutBookmarksView",
           "group": "navigation"
         }
       ],
@@ -138,6 +201,31 @@
           "command": "jxscout.copyHostnames",
           "when": "view == jxscoutAstView",
           "group": "1_modification"
+        },
+        {
+          "command": "jxscout.bookmarkMatch",
+          "when": "view == jxscoutAstView && viewItem == match",
+          "group": "2_bookmark"
+        },
+        {
+          "command": "jxscout.markInteresting",
+          "when": "view == jxscoutAstView && viewItem == match",
+          "group": "2_bookmark"
+        },
+        {
+          "command": "jxscout.createFindingFromMatches",
+          "when": "view == jxscoutAstView && viewItem == match",
+          "group": "3_findings"
+        },
+        {
+          "command": "jxscout.deleteBookmark",
+          "when": "view == jxscoutBookmarksView && viewItem == bookmark",
+          "group": "1_modification"
+        },
+        {
+          "command": "jxscout.copyFindingDescription",
+          "when": "view == jxscoutFindingsView && viewItem == finding",
+          "group": "1_modification"
         }
       ]
     },
@@ -153,6 +241,11 @@
           "type": "number",
           "default": 3333,
           "description": "Port where jxscout is running"
+        },
+        "jxscout.apiToken": {
+          "type": "string",
+          "default": "",
+          "description": "Optional bearer token for the jxscout HTTP API"
         }
       }
     }
@@ -165,7 +258,8 @@
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
     "package": "npm run check-types && npm run lint && node esbuild.js --production",
     "check-types": "tsc --noEmit",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "test": "node --test --experimental-strip-types test/*.test.mts"
   },
   "dependencies": {
     "uuid": "^9.0.1",

@@ -1,11 +1,14 @@
 import * as vscode from "vscode";
 import WebSocket from "ws";
 import { v4 as uuidv4 } from "uuid";
-import { AnalysisResult, Position } from "../types";
+import { AnalysisResult, ProjectAnalysisResult, Position } from "../types";
 
 enum MessageType {
   GetAnalysisRequest = "getAnalysisRequest",
   GetAnalysisResponse = "getAnalysisResponse",
+
+  GetProjectAnalysisRequest = "getProjectAnalysisRequest",
+  GetProjectAnalysisResponse = "getProjectAnalysisResponse",
 
   Error = "error",
 }
@@ -34,12 +37,14 @@ export class WebSocketClient {
   private messageCallbacks: Map<
     string,
     {
-      resolve: (result: AnalysisResult) => void;
+      resolve: (result: any) => void;
       reject: (error: Error) => void;
+      timer: NodeJS.Timeout;
     }
   > = new Map();
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private readonly reconnectDelay = 5000; // 5 seconds
+  private readonly requestTimeout = 30000; // matches server-side analysis budget
   private serverUrl: string;
   private readyPromise: Promise<void> | null = null;
 
@@ -85,6 +90,7 @@ export class WebSocketClient {
 
         this.ws.on("close", () => {
           console.log("WebSocket connection closed");
+          this.rejectPending("WebSocket connection closed");
           this.scheduleReconnect();
         });
 
@@ -118,8 +124,10 @@ export class WebSocketClient {
 
     switch (type) {
       case MessageType.GetAnalysisResponse:
+      case MessageType.GetProjectAnalysisResponse:
         const callback = this.messageCallbacks.get(id);
         if (callback) {
+          clearTimeout(callback.timer);
           if (error) {
             callback.reject(new Error(error.message));
           } else {
@@ -137,7 +145,7 @@ export class WebSocketClient {
     }
   }
 
-  async getAnalysis(filePath: string): Promise<AnalysisResult> {
+  private sendRequest<T>(type: MessageType, payload: any): Promise<T> {
     return new Promise((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         reject(new Error("WebSocket is not connected"));
@@ -145,27 +153,47 @@ export class WebSocketClient {
       }
 
       const messageId = uuidv4();
-      const message = {
-        type: MessageType.GetAnalysisRequest,
-        id: messageId,
-        payload: {
-          filePath: filePath,
-        },
-      };
+      const timer = setTimeout(() => {
+        if (this.messageCallbacks.delete(messageId)) {
+          reject(new Error("jxscout request timed out"));
+        }
+      }, this.requestTimeout);
 
-      this.messageCallbacks.set(messageId, { resolve, reject });
-      this.ws.send(JSON.stringify(message));
+      this.messageCallbacks.set(messageId, { resolve, reject, timer });
+      this.ws.send(JSON.stringify({ type, id: messageId, payload }));
     });
   }
 
-  disconnect() {
-    if (this.ws) {
+  async getAnalysis(filePath: string): Promise<AnalysisResult> {
+    return this.sendRequest<AnalysisResult>(MessageType.GetAnalysisRequest, {
+      filePath,
+    });
+  }
+
+  // Pro v2: project-wide analysis (all tracked files) for project scope view
+  async getProjectAnalysis(): Promise<ProjectAnalysisResult> {
+    return this.sendRequest<ProjectAnalysisResult>(
+      MessageType.GetProjectAnalysisRequest,
+      {}
+    );
+  }
+
+  disconnect() {    if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
+    }
+    this.rejectPending("WebSocket disconnected");
+  }
+
+  private rejectPending(reason: string) {
+    for (const [id, cb] of this.messageCallbacks) {
+      clearTimeout(cb.timer);
+      cb.reject(new Error(reason));
+      this.messageCallbacks.delete(id);
     }
   }
 }

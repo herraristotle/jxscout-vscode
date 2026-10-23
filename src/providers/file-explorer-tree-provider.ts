@@ -2,6 +2,8 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import { ViewScope } from "../types";
+import { WebSocketClient } from "../services/websocket-client";
+import { HttpClient } from "../services/http-client";
 
 export class FileExplorerTreeItem extends vscode.TreeItem {
   constructor(
@@ -33,9 +35,25 @@ export class FileExplorerTreeProvider
 
   private _scope: ViewScope = "file";
   private _workspaceRoot?: string;
+  private _wsClient?: WebSocketClient;
+  private _httpClient?: HttpClient;
 
-  constructor(workspaceRoot?: string) {
+  constructor(
+    workspaceRoot?: string,
+    wsClient?: WebSocketClient,
+    httpClient?: HttpClient
+  ) {
     this._workspaceRoot = workspaceRoot;
+    this._wsClient = wsClient;
+    this._httpClient = httpClient;
+  }
+
+  setWebSocketClient(wsClient: WebSocketClient) {
+    this._wsClient = wsClient;
+  }
+
+  setHttpClient(httpClient: HttpClient) {
+    this._httpClient = httpClient;
   }
 
   getScope(): ViewScope {
@@ -76,18 +94,78 @@ export class FileExplorerTreeProvider
       }
 
       if (!element) {
-        return Promise.resolve([
-          new FileExplorerTreeItem(
-            "Current File Structure",
-            vscode.TreeItemCollapsibleState.Expanded,
-            "directory",
-            "file-code"
-          ),
-        ]);
+        return this.getGraphGroups(editor.document.uri.fsPath);
       }
 
-      // TODO: Implement file structure analysis
+      if (element.contextValue === "relationGroup") {
+        return this.getGraphItems(editor.document.uri.fsPath, element.id);
+      }
+
       return Promise.resolve([]);
+    }
+  }
+
+  // Groups come from the asset graph: how HTML, JS, chunks, sourcemaps and
+  // reversed sources relate to the focused file.
+  private async getGraphGroups(
+    filePath: string
+  ): Promise<FileExplorerTreeItem[]> {
+    if (!this._httpClient) {
+      return [];
+    }
+
+    try {
+      const graph = await this._httpClient.getAssetGraph(filePath);
+      if (!graph.nodes?.length) {
+        return [];
+      }
+
+      const counts = new Map<string, number>();
+      for (const node of graph.nodes) {
+        counts.set(node.relation, (counts.get(node.relation) || 0) + 1);
+      }
+
+      return [...counts.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([relation, count]) => {
+          const item = new FileExplorerTreeItem(
+            `${relationLabel(relation)} (${count})`,
+            vscode.TreeItemCollapsibleState.Expanded,
+            "relationGroup",
+            relationIcon(relation)
+          );
+          item.id = relation;
+          return item;
+        });
+    } catch {
+      return [];
+    }
+  }
+
+  private async getGraphItems(
+    filePath: string,
+    relation: string | undefined
+  ): Promise<FileExplorerTreeItem[]> {
+    if (!this._httpClient || !relation) {
+      return [];
+    }
+
+    try {
+      const graph = await this._httpClient.getAssetGraph(filePath);
+      return (graph.nodes || [])
+        .filter((node) => node.relation === relation)
+        .map((node) => {
+          const target = node.path || node.url;
+          return new FileExplorerTreeItem(
+            path.basename(node.path || node.url),
+            vscode.TreeItemCollapsibleState.None,
+            "file",
+            this.getFileIcon(target),
+            vscode.Uri.file(target)
+          );
+        });
+    } catch {
+      return [];
     }
   }
 
@@ -164,4 +242,32 @@ export class FileExplorerTreeProvider
         return "file";
     }
   }
+}
+
+const relationLabels: Record<string, string> = {
+  loader: "Loaded by",
+  loaded: "Loads",
+  chunk: "Chunks",
+  sourcemap_owner: "Source map",
+  sourcemap_source: "Reversed sources",
+  optimized: "Optimized from",
+  unpacked: "Unpacked from",
+};
+
+const relationIcons: Record<string, string> = {
+  loader: "arrow-up",
+  loaded: "arrow-down",
+  chunk: "file-submodule",
+  sourcemap_owner: "map",
+  sourcemap_source: "file-code",
+  optimized: "rocket",
+  unpacked: "package",
+};
+
+function relationLabel(relation: string): string {
+  return relationLabels[relation] || relation;
+}
+
+function relationIcon(relation: string): string {
+  return relationIcons[relation] || "file";
 }

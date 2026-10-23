@@ -1,8 +1,11 @@
 import * as vscode from "vscode";
 import { WebSocketClient } from "./services/websocket-client";
+import { HttpClient } from "./services/http-client";
+import { MatchStateService } from "./services/match-state";
 import { createViews } from "./views";
-import { registerCommands } from "./commands";
-import { PremiumView } from "./views/premium-view";
+import { registerCommands, CommandDeps } from "./commands";
+import { FindingsTreeProvider } from "./providers/findings-tree-provider";
+import { BookmarksTreeProvider } from "./providers/bookmarks-tree-provider";
 import { VersionCheckService } from "./services/versionCheck";
 
 export function activate(context: vscode.ExtensionContext) {
@@ -15,11 +18,17 @@ export function activate(context: vscode.ExtensionContext) {
     },
   });
 
+  // Pro v2: match state service (seen/uninteresting) — must init before views
+  const matchStates = MatchStateService.getInstance(context);
+
   // Initialize WebSocket client
   const config = vscode.workspace.getConfiguration("jxscout");
   const host = config.get<string>("serverHost") || "localhost";
   const port = config.get<number>("serverPort") || 3333;
   const wsClient = new WebSocketClient(`ws://${host}:${port}/ws`);
+
+  // Pro v2: REST client for findings/bookmarks
+  const http = new HttpClient();
 
   const connectionStatusBarItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right
@@ -28,12 +37,42 @@ export function activate(context: vscode.ExtensionContext) {
   connectionStatusBarItem.tooltip = "Connecting to jxscout server...";
   connectionStatusBarItem.show();
 
+  // Create views and get providers
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const { astView, fileExplorerView, analysisTreeProvider, explorerTreeProvider } = createViews(
+    context,
+    workspaceRoot,
+    wsClient
+  );
+
+  // Connect FileExplorerTreeProvider to the analysis + graph services
+  explorerTreeProvider.setWebSocketClient(wsClient);
+  explorerTreeProvider.setHttpClient(http);
+
+  // Pro v2: findings + bookmarks tree views
+  const findingsProvider = new FindingsTreeProvider(http);
+  const bookmarksProvider = new BookmarksTreeProvider(http);
+  const findingsView = vscode.window.createTreeView("jxscoutFindingsView", {
+    treeDataProvider: findingsProvider,
+    showCollapseAll: false,
+  });
+  const bookmarksView = vscode.window.createTreeView("jxscoutBookmarksView", {
+    treeDataProvider: bookmarksProvider,
+    showCollapseAll: false,
+  });
+  findingsView.title = "Findings";
+  bookmarksView.title = "Bookmarks";
+  context.subscriptions.push(findingsView, bookmarksView);
+
   // Connect to WebSocket server
   wsClient
     .connect()
     .then(() => {
       connectionStatusBarItem.text = "jxscout $(check)";
       connectionStatusBarItem.tooltip = "Connected to jxscout server";
+      // Pro v2: initial data loads once connected
+      findingsProvider.refresh();
+      bookmarksProvider.refresh();
     })
     .catch((error) => {
       connectionStatusBarItem.text = "jxscout $(error)";
@@ -43,37 +82,19 @@ export function activate(context: vscode.ExtensionContext) {
       );
     });
 
-  // Create views and get providers
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const { astView, analysisTreeProvider } = createViews(
-    context,
-    workspaceRoot,
-    wsClient
-  );
-
   // Register commands
-  registerCommands(
-    context,
+  const deps: CommandDeps = {
     analysisTreeProvider,
-    null, // No longer need explorerTreeProvider
+    explorerTreeProvider,
+    fileExplorerView,
+    findingsProvider,
+    bookmarksProvider,
     astView,
-    null // No longer need fileView
-  );
-
-  // Register premium views
-  const premiumViewProvider = PremiumView.getInstance();
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider("jxscoutPremiumView", {
-      resolveWebviewView: (webviewView, context, token) => {
-        premiumViewProvider.resolveWebviewView(webviewView, context, token);
-      },
-    }),
-    vscode.window.registerWebviewViewProvider("jxscoutFileView", {
-      resolveWebviewView: (webviewView, context, token) => {
-        premiumViewProvider.resolveWebviewView(webviewView, context, token);
-      },
-    })
-  );
+    wsClient,
+    http,
+    matchStates,
+  };
+  registerCommands(context, deps);
 
   // Add status bar items to subscriptions
   context.subscriptions.push(connectionStatusBarItem);

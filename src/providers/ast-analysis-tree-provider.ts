@@ -6,7 +6,10 @@ import {
   ViewScope,
   SortMode,
 } from "../types";
+import { MatchStateService } from "../services/match-state";
+import { filterMatches, MatchFilter } from "../core/match-filter";
 import * as path from "path";
+
 
 export class AstAnalysisTreeItem extends vscode.TreeItem {
   public readonly node: ASTAnalyzerTreeNode;
@@ -33,6 +36,10 @@ export class AstAnalysisTreeItem extends vscode.TreeItem {
       this.contextValue = "match";
     }
 
+    if (node.type === "file") {
+      this.contextValue = "fileNode";
+    }
+
     if (iconName) {
       if (iconName.startsWith("resources:")) {
         const iconPath = iconName.replace("resources:", "");
@@ -56,6 +63,12 @@ export class AstAnalysisTreeItem extends vscode.TreeItem {
   }
 }
 
+// Pro v2: project scope node data holds filePath + analysis results
+interface ProjectFileNode extends ASTAnalyzerTreeNode {
+  type: "file";
+  data: { filePath: string; results: ASTAnalyzerTreeNode[] };
+}
+
 export class AstAnalysisTreeProvider
   implements vscode.TreeDataProvider<AstAnalysisTreeItem>
 {
@@ -71,6 +84,11 @@ export class AstAnalysisTreeProvider
   private _state: TreeState = "empty";
   private _sortMode: SortMode = "occurrence";
 
+  // Pro v2: filter and project data
+  private _filter: MatchFilter = "all";
+  private _projectFiles?: ProjectFileNode[];
+  private _matchStates?: MatchStateService;
+
   getScope(): ViewScope {
     return this._scope;
   }
@@ -82,6 +100,19 @@ export class AstAnalysisTreeProvider
   setSortMode(mode: SortMode) {
     this._sortMode = mode;
     this.refresh();
+  }
+
+  getFilter(): MatchFilter {
+    return this._filter;
+  }
+
+  setFilter(filter: MatchFilter) {
+    this._filter = filter;
+    this.refresh();
+  }
+
+  setMatchStates(service: MatchStateService) {
+    this._matchStates = service;
   }
 
   setScope(scope: ViewScope) {
@@ -102,6 +133,12 @@ export class AstAnalysisTreeProvider
     this.refresh();
   }
 
+  setProjectData(files: ProjectFileNode[] | undefined) {
+    this._projectFiles = files;
+    this._state = files ? "success" : "empty";
+    this.refresh();
+  }
+
   refresh(): void {
     this._onDidChangeTreeData.fire();
   }
@@ -110,8 +147,85 @@ export class AstAnalysisTreeProvider
     return element;
   }
 
+  // Pro v2: filter match nodes by filter mode using match state service
+  private filterMatches(
+    nodes: ASTAnalyzerTreeNode[],
+    filePath: string
+  ): ASTAnalyzerTreeNode[] {
+    const states = this._matchStates;
+    return filterMatches(
+      nodes,
+      filePath,
+      this._filter,
+      states
+        ? (_fp, data) => states.get(states.keyFor(_fp, data))
+        : undefined
+    );
+  }
+
   getChildren(element?: AstAnalysisTreeItem): Thenable<AstAnalysisTreeItem[]> {
+    // Pro v2 project scope: show file list, expandable to per-file results
     if (this._scope === "project") {
+      if (this._state === "loading") {
+        return Promise.resolve([
+          new AstAnalysisTreeItem({
+            label: "Loading project analysis...",
+            collapsibleState: vscode.TreeItemCollapsibleState.None,
+            iconName: "loading~spin",
+            node: { type: "navigation", label: "Loading project analysis..." },
+          }),
+        ]);
+      }
+      if (!this._projectFiles?.length) {
+        return Promise.resolve([
+          new AstAnalysisTreeItem({
+            label: "No analyzed files in project",
+            collapsibleState: vscode.TreeItemCollapsibleState.None,
+            iconName: "info",
+            node: { type: "navigation", label: "No analyzed files" },
+          }),
+        ]);
+      }
+      if (!element) {
+        const sortedFiles = [...this._projectFiles].sort((a, b) =>
+          (a.label || "").localeCompare(b.label || "")
+        );
+        return Promise.resolve(
+          sortedFiles.map(
+            (file) =>
+              new AstAnalysisTreeItem({
+                label: file.label || file.data.filePath,
+                collapsibleState: file.children?.length
+                  ? vscode.TreeItemCollapsibleState.Collapsed
+                  : vscode.TreeItemCollapsibleState.None,
+                iconName: "file-code",
+                node: file,
+                description: file.description,
+              })
+          )
+        );
+      }
+      if (element.node.type === "file" && element.node.data?.results) {
+        const filePath = element.node.data.filePath;
+        const filtered = this.filterMatches(
+          element.node.data.results,
+          filePath
+        );
+        return Promise.resolve(
+          filtered.map(
+            (child) =>
+              new AstAnalysisTreeItem({
+                label: child.label || "Node",
+                collapsibleState: child.children?.length
+                  ? vscode.TreeItemCollapsibleState.Expanded
+                  : vscode.TreeItemCollapsibleState.None,
+                iconName: child.iconName,
+                node: child,
+                description: child.description,
+              })
+          )
+        );
+      }
       return Promise.resolve([]);
     }
 
@@ -135,10 +249,7 @@ export class AstAnalysisTreeProvider
           label: "Loading analysis...",
           collapsibleState: vscode.TreeItemCollapsibleState.None,
           iconName: "loading~spin",
-          node: {
-            type: "navigation",
-            label: "Loading analysis...",
-          },
+          node: { type: "navigation", label: "Loading analysis..." },
         }),
       ]);
     }
@@ -165,22 +276,22 @@ export class AstAnalysisTreeProvider
           label: "No descriptors found",
           collapsibleState: vscode.TreeItemCollapsibleState.None,
           iconName: "info",
-          node: {
-            type: "navigation",
-            label: "No descriptors found",
-          },
+          node: { type: "navigation", label: "No descriptors found" },
         }),
       ]);
     }
 
     if (!element) {
+      const activePath =
+        vscode.window.activeTextEditor?.document.uri.fsPath || "";
+      const filtered = this.filterMatches(this._analysisData, activePath);
       const sortedNodes =
         this._sortMode === "alphabetical"
-          ? [...this._analysisData].sort(
+          ? [...filtered].sort(
               (a: ASTAnalyzerTreeNode, b: ASTAnalyzerTreeNode) =>
                 (a.label || "").localeCompare(b.label || "")
             )
-          : this._analysisData;
+          : filtered;
 
       return Promise.resolve(
         sortedNodes.map(
@@ -199,13 +310,16 @@ export class AstAnalysisTreeProvider
     }
 
     if (element.node.children) {
+      const activePath =
+        vscode.window.activeTextEditor?.document.uri.fsPath || "";
+      const filtered = this.filterMatches(element.node.children, activePath);
       const sortedChildren =
         this._sortMode === "alphabetical"
-          ? [...element.node.children].sort(
+          ? [...filtered].sort(
               (a: ASTAnalyzerTreeNode, b: ASTAnalyzerTreeNode) =>
                 (a.label || "").localeCompare(b.label || "")
             )
-          : element.node.children;
+          : filtered;
 
       return Promise.resolve(
         sortedChildren.map(

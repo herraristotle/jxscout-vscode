@@ -6,9 +6,12 @@ A VSCode extension for integrating with [jxscout](https://github.com/franciscone
 
 - Visualize references to behavior interesting for security researchers
 - Copy paths, query parameters, and hostnames for brute forcing
-- TODO: Project-level visualization of discoveries
-- TODO: Project-level navigation of assets
-- TODO: Visualization of relationships between HTML, JS, and Source Maps
+- Project scope: browse every analyzed file and expand into its descriptors
+- File Explorer view: assets related to the focused file
+- Findings view (severity filter) and Bookmarks view, backed by the jxscout REST API
+- Match state per workspace: cycle `all` / `unseen` / `interesting`, mark interesting, reset
+
+Roadmap: explicit visualization of relationships between HTML, JS and Source Maps.
 
 ## Demo
 
@@ -29,8 +32,9 @@ The extension can be configured through VSCode settings:
 
 | Setting              | Description                              | Default     |
 | -------------------- | ---------------------------------------- | ----------- |
-| `jxscout.serverHost` | Hostname of the jxscout WebSocket server | `localhost` |
-| `jxscout.serverPort` | Port of the jxscout WebSocket server     | `3333`      |
+| `jxscout.serverHost` | Hostname of the jxscout server           | `localhost` |
+| `jxscout.serverPort` | Port of the jxscout server               | `3333`      |
+| `jxscout.apiToken`   | Optional bearer token for the HTTP API   | (empty)     |
 
 ## Usage
 
@@ -42,9 +46,14 @@ The extension can be configured through VSCode settings:
 
 - A running jxscout server (version >=0.7.0)
 
-## License
+## Development
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+```bash
+npm install
+npm run compile   # typecheck + lint + bundle
+npm test          # unit tests (node:test, no extra deps)
+npm run package   # production bundle
+```
 
 ## Contributing
 
