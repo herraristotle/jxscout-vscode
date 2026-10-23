@@ -1,6 +1,6 @@
 # jxscout-vscode
 
-A VSCode extension for integrating with [jxscout](https://github.com/francisconeves97/jxscout), a tool that automatically saves JS files and extracts relevant code.
+A VSCode extension for integrating with [jxscout](https://github.com/herraristotle/jxscout), a tool that automatically saves JS files and extracts relevant code.
 
 ## Features
 
@@ -19,7 +19,7 @@ https://github.com/user-attachments/assets/b32294ff-8942-46eb-9033-2e2632818787
 
 ## Installation
 
-1. Download the latest `.vsix` file from the [releases](https://github.com/francisconeves97/jxscout-vscode/releases) page
+1. Download the latest `.vsix` file from the [releases](https://github.com/herraristotle/jxscout-vscode/releases) page
 2. In VSCode, open the extensions sidebar menu
 3. Click the three dots at the top and select "Install from VSIX..."
 4. Select the `.vsix` file you just downloaded
